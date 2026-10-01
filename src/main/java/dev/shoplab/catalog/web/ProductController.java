@@ -37,8 +37,7 @@ public class ProductController {
     public RestResponse<ProductResponse> create(@Valid CreateProductRequest request) {
         var product = createProductUC.execute(request.toCommand());
         return RestResponse.ResponseBuilder
-                .<ProductResponse>create(URI.create("/api/v1/products/" + product.getId()).getPort())
-                .entity(ProductResponse.from(product))
+                .<ProductResponse>created(URI.create("/api/v1/products/" + product.getId()))
                 .build();
     }
 
