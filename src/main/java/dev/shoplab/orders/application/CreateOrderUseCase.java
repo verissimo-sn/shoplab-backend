@@ -7,6 +7,8 @@ import dev.shoplab.orders.domain.Order;
 import dev.shoplab.orders.domain.OrderItem;
 import dev.shoplab.shared.errors.BusinessRuleException;
 import dev.shoplab.shared.events.DomainEventPublisher;
+import dev.shoplab.shipping.api.ShippingApi;
+import io.quarkus.narayana.jta.QuarkusTransaction;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.transaction.Transactional;
 
@@ -23,22 +25,29 @@ public class CreateOrderUseCase {
     private final OrderRepository orderRepository;
     private final CatalogApi catalogApi;
     private final DomainEventPublisher event;
+    private final ShippingApi shippingApi;
 
-    public CreateOrderUseCase(OrderRepository orderRepository, CatalogApi catalogApi, DomainEventPublisher event) {
+    public CreateOrderUseCase(OrderRepository orderRepository, CatalogApi catalogApi, DomainEventPublisher event, ShippingApi shippingApi) {
         this.orderRepository = orderRepository;
         this.catalogApi = catalogApi;
         this.event = event;
+        this.shippingApi = shippingApi;
     }
 
-    @Transactional
     public Order execute(Command cmd) {
+       var quote = shippingApi.quote(cmd.zipCode());
+       return QuarkusTransaction.requiringNew().call(
+               () -> createOrder(cmd, quote.cost())
+       );
+    }
+
+    private Order createOrder(Command cmd, BigDecimal shippingCost) {
         var drafts = cmd.items().stream().map(i -> {
             var product = catalogApi.findProduct(i.productId())
                     .orElseThrow(() -> new BusinessRuleException("PRODUCT_NOT_FOUND", "Product not found: " + i.productId()));
             catalogApi.reserveStock(product.id(), i.quantity());
             return new OrderItem.Draft(product.id(), product.sku(), product.name(),  product.price(), i.quantity());
         }).toList();
-        var shippingCost = BigDecimal.ZERO;
         var order = Order.place(cmd.customerEmail(), cmd.zipCode(), shippingCost, drafts);
         order.markStockReserved();
         orderRepository.save(order);
